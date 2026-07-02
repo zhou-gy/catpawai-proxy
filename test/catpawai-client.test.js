@@ -87,6 +87,39 @@ test('buildCatPawNativePayload keeps large tool instructions compact', () => {
   assert.equal(instruction.includes(verboseDescription), false);
 });
 
+test('buildCatPawNativePayload instructs file tasks to call tools', () => {
+  const payload = buildCatPawNativePayload({
+    messages: [{ role: 'user', content: 'Fix AGENTS.md for me' }],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'Read',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { file_path: { type: 'string' } }, required: ['file_path'] },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'Edit',
+          description: 'Edit a file',
+          parameters: {
+            type: 'object',
+            properties: { file_path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' } },
+            required: ['file_path', 'old_string', 'new_string'],
+          },
+        },
+      },
+    ],
+  });
+
+  const instruction = payload.messages[0].content;
+  assert.match(instruction, /MUST call tools/);
+  assert.match(instruction, /file/i);
+  assert.match(instruction, /Never claim/);
+});
+
 test('buildCatPawHeaders creates CatPaw authentication headers', () => {
   const headers = buildCatPawHeaders({
     CATPAWAI_ACCESS_TOKEN: 'token-123',

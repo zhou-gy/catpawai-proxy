@@ -115,9 +115,12 @@ function buildToolInstruction(tools) {
   return [
     'You can call tools, but this API only accepts a strict JSON tool-call response.',
     'When a tool is needed, respond with JSON only and no prose.',
+    'For any file, code, shell, workspace, search, read, edit, write, or project task, you MUST call tools instead of describing the change.',
+    'Never claim that you changed, read, searched, or executed anything unless you returned a tool call for it.',
+    'For file fixes, usually call Read/Glob/Grep first, then Edit/Write. For commands, call Bash.',
     'Use exactly this shape:',
     '{"tool_calls":[{"name":"ToolName","arguments":{"arg":"value"}}]}',
-    'If no tool is needed, answer normally.',
+    'Only answer normally for pure explanation or conversation tasks that do not need workspace access.',
     'Required argument names are marked with *.',
     'Available tools:',
     ...tools.map(summarizeTool),
