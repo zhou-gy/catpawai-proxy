@@ -166,6 +166,61 @@ test('createChatCompletion calls CatPaw native stream endpoint and aggregates ch
   assert.equal(calls[0].options.headers.Accept, 'text/event-stream');
 });
 
+test('createChatCompletion converts CatPaw tool JSON text to OpenAI tool calls', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    const text = [
+      'data: {"id":"chatcmpl-tool","object":"chat.completion.chunk","created":1,"model":"glm-5.2","content":"{\\"tool_calls\\":[{\\"name\\":\\"Bash\\",\\"arguments\\":{\\"command\\":\\"ls\\"}}]}","finishReason":"stop"}',
+      '',
+    ].join('\n');
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      text: async () => text,
+    };
+  };
+
+  const result = await createChatCompletion({
+    model: 'glm-5.2',
+    messages: [{ role: 'user', content: 'list files' }],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'Bash',
+          description: 'Run a shell command',
+          parameters: {
+            type: 'object',
+            properties: { command: { type: 'string' } },
+            required: ['command'],
+          },
+        },
+      },
+    ],
+    env: {
+      CATPAWAI_OPENAI_BASE_URL: 'https://catpaw.meituan.com/api/gpt',
+      CATPAWAI_AUTH_MODE: 'catpaw',
+      CATPAWAI_ACCESS_TOKEN: 'token-123',
+      CATPAWAI_MIS_ID: 'user-a',
+      CATPAWAI_ENCRYPTION: 'false',
+    },
+    fetchImpl,
+  });
+
+  assert.equal(result.choices[0].finish_reason, 'tool_calls');
+  assert.equal(result.choices[0].message.content, null);
+  assert.equal(result.choices[0].message.tool_calls[0].type, 'function');
+  assert.equal(result.choices[0].message.tool_calls[0].function.name, 'Bash');
+  assert.equal(result.choices[0].message.tool_calls[0].function.arguments, '{"command":"ls"}');
+
+  const payload = JSON.parse(calls[0].options.body);
+  assert.equal(payload.messages[0].role, 'system');
+  assert.match(payload.messages[0].content, /You can call tools/);
+  assert.match(payload.messages[0].content, /Bash/);
+});
+
 test('CatPaw crypto encrypts requests and decrypts responses', () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,

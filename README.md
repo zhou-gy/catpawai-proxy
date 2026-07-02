@@ -15,6 +15,7 @@ This project is intended for local learning, research, and personal integration 
 - OpenAI-compatible `POST /v1/chat/completions`
 - OpenAI-compatible `GET /v1/models`
 - Non-streaming and streaming response support
+- Experimental non-streaming tool-call adapter for clients that send OpenAI `tools`
 - CatPawAI request encryption and response decoding
 - Windows local state import helper
 - Ubuntu systemd deployment helper
@@ -111,6 +112,23 @@ Useful model ids include:
 `catpawai-cn-text` is a local alias currently mapped to `glm-5.2`.
 
 `catpawai` is the default model alias and resolves to `CATPAWAI_MODEL`.
+
+## Tool Calls
+
+This proxy includes an experimental non-streaming tool-call adapter. When a client sends OpenAI-compatible `tools`, the proxy injects a strict JSON tool-call instruction into the CatPawAI native request. If the model responds with JSON like:
+
+```json
+{"tool_calls":[{"name":"Bash","arguments":{"command":"ls"}}]}
+```
+
+the proxy converts it to OpenAI `message.tool_calls` with `finish_reason: "tool_calls"` so clients such as coding agents can execute the tool.
+
+Limitations:
+
+- This is prompt-based adaptation, not CatPawAI GUI's internal agent protocol.
+- It depends on the model following the strict JSON format.
+- Streaming tool calls are not adapted yet.
+- If the model replies with normal text, the proxy returns normal text.
 
 ## Token Lifetime
 

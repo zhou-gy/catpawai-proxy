@@ -179,3 +179,61 @@ test('chat endpoint returns upstream result', async () => {
     server.close();
   }
 });
+
+test('chat endpoint passes tool fields to client', async () => {
+  let capturedRequest;
+  const catpawaiClient = {
+    createChatCompletion: async (request) => {
+      capturedRequest = request;
+      return {
+        id: 'chatcmpl-tools',
+        object: 'chat.completion',
+        created: 1,
+        model: 'catpawai',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'OK' },
+            finish_reason: 'stop',
+          },
+        ],
+      };
+    },
+    discoverCatPawAi: () => ({ cliExists: true }),
+  };
+  const app = createApp({ catpawaiClient });
+  const server = await listen(app);
+  const tools = [
+    {
+      type: 'function',
+      function: {
+        name: 'Bash',
+        description: 'Run a shell command',
+        parameters: {
+          type: 'object',
+          properties: { command: { type: 'string' } },
+          required: ['command'],
+        },
+      },
+    },
+  ];
+  try {
+    const response = await request(server, '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'catpawai',
+        messages: [{ role: 'user', content: 'list files' }],
+        tools,
+        tool_choice: 'auto',
+        parallel_tool_calls: false,
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(capturedRequest.tools, tools);
+    assert.equal(capturedRequest.tool_choice, 'auto');
+    assert.equal(capturedRequest.parallel_tool_calls, false);
+  } finally {
+    server.close();
+  }
+});

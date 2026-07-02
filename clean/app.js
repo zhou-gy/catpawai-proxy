@@ -79,6 +79,9 @@ function createApp({ env = process.env, catpawaiClient = defaultCatPawAiClient }
         stream: Boolean(req.body.stream),
         temperature: req.body.temperature,
         max_tokens: req.body.max_tokens,
+        tools: req.body.tools,
+        tool_choice: req.body.tool_choice,
+        parallel_tool_calls: req.body.parallel_tool_calls,
         env,
         signal: req.signal,
       };

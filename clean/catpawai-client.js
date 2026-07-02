@@ -78,13 +78,54 @@ function discoverCatPawAi(env = process.env) {
   };
 }
 
-function buildUpstreamPayload({ model, messages, stream, temperature, max_tokens }) {
+function hasTools(tools) {
+  return Array.isArray(tools) && tools.length > 0;
+}
+
+function getToolName(tool) {
+  return tool?.function?.name || tool?.name || '';
+}
+
+function buildToolInstruction(tools) {
+  const toolSummaries = tools.map((tool) => ({
+    name: getToolName(tool),
+    description: tool?.function?.description || tool?.description || '',
+    parameters: tool?.function?.parameters || tool?.input_schema || tool?.parameters || {},
+  }));
+  return [
+    'You can call tools, but this API only accepts a strict JSON tool-call response.',
+    'When a tool is needed, respond with JSON only and no prose.',
+    'Use exactly this shape:',
+    '{"tool_calls":[{"name":"ToolName","arguments":{"arg":"value"}}]}',
+    'If no tool is needed, answer normally.',
+    `Available tools: ${JSON.stringify(toolSummaries)}`,
+  ].join('\n');
+}
+
+function buildMessagesWithToolInstruction(messages, tools) {
+  if (!hasTools(tools)) return messages;
+  return [{ role: 'system', content: buildToolInstruction(tools) }, ...messages];
+}
+
+function buildUpstreamPayload({
+  model,
+  messages,
+  stream,
+  temperature,
+  max_tokens,
+  tools,
+  tool_choice,
+  parallel_tool_calls,
+}) {
   return {
     model: resolveModelId(model),
     messages,
     stream: Boolean(stream),
     ...(temperature !== undefined ? { temperature } : {}),
     ...(max_tokens !== undefined ? { max_tokens } : {}),
+    ...(hasTools(tools) ? { tools } : {}),
+    ...(tool_choice !== undefined ? { tool_choice } : {}),
+    ...(parallel_tool_calls !== undefined ? { parallel_tool_calls } : {}),
   };
 }
 
@@ -105,9 +146,9 @@ function messageContentToText(content) {
     .join('\n');
 }
 
-function buildCatPawNativePayload({ messages }) {
+function buildCatPawNativePayload({ messages, tools }) {
   return {
-    messages: messages.map((message) => ({
+    messages: buildMessagesWithToolInstruction(messages, tools).map((message) => ({
       role: message.role,
       content: messageContentToText(message.content),
       triggerMode: 'VSCode.Chat',
@@ -254,6 +295,79 @@ function toOpenAiCompletion(chunks, requestedModel) {
   };
 }
 
+function stripJsonFence(text) {
+  const trimmed = String(text || '').trim();
+  const fenceMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenceMatch ? fenceMatch[1].trim() : trimmed;
+}
+
+function parseToolJson(text) {
+  const stripped = stripJsonFence(text);
+  const direct = parseJsonText(stripped);
+  if (direct && typeof direct === 'object') return direct;
+  const start = stripped.indexOf('{');
+  const end = stripped.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  const extracted = parseJsonText(stripped.slice(start, end + 1));
+  return extracted && typeof extracted === 'object' ? extracted : null;
+}
+
+function normalizeToolCallItems(parsed) {
+  if (Array.isArray(parsed)) return parsed;
+  if (Array.isArray(parsed?.tool_calls)) return parsed.tool_calls;
+  if (Array.isArray(parsed?.tool_uses)) return parsed.tool_uses;
+  if (parsed?.name || parsed?.tool || parsed?.function?.name) return [parsed];
+  return [];
+}
+
+function normalizeToolArguments(call) {
+  const value = call.arguments ?? call.input ?? call.parameters ?? call.function?.arguments ?? {};
+  if (typeof value !== 'string') return value && typeof value === 'object' ? value : {};
+  const parsed = parseJsonText(value);
+  return parsed && typeof parsed === 'object' ? parsed : { value };
+}
+
+function convertTextToToolCalls(text, tools) {
+  if (!hasTools(tools)) return [];
+  const allowedToolNames = new Set(tools.map(getToolName).filter(Boolean));
+  return normalizeToolCallItems(parseToolJson(text))
+    .map((call) => ({
+      name: call.name || call.tool || call.function?.name,
+      arguments: normalizeToolArguments(call),
+    }))
+    .filter((call) => call.name && (!allowedToolNames.size || allowedToolNames.has(call.name)))
+    .map((call, index) => ({
+      id: `call_${Date.now()}_${index}`,
+      type: 'function',
+      function: {
+        name: call.name,
+        arguments: JSON.stringify(call.arguments),
+      },
+    }));
+}
+
+function adaptCompletionToolCalls(completion, tools) {
+  const choice = completion?.choices?.[0];
+  const content = choice?.message?.content;
+  if (typeof content !== 'string') return completion;
+  const toolCalls = convertTextToToolCalls(content, tools);
+  if (!toolCalls.length) return completion;
+  return {
+    ...completion,
+    choices: [
+      {
+        ...choice,
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: toolCalls,
+        },
+        finish_reason: 'tool_calls',
+      },
+    ],
+  };
+}
+
 function toOpenAiStreamLine(chunk) {
   if (chunk.lastOne && chunk.content === '[DONE]') return 'data: [DONE]\n\n';
   const choice = chunk.choices?.[0] || {};
@@ -332,6 +446,9 @@ async function requestChatCompletion({
   stream = false,
   temperature,
   max_tokens,
+  tools,
+  tool_choice,
+  parallel_tool_calls,
   env = process.env,
   fetchImpl = fetch,
   signal,
@@ -348,8 +465,17 @@ async function requestChatCompletion({
       headers.Connection = 'keep-alive';
     }
     const payload = isNativeCatPaw
-      ? buildCatPawNativePayload({ messages })
-      : buildUpstreamPayload({ model, messages, stream, temperature, max_tokens });
+      ? buildCatPawNativePayload({ messages, tools })
+      : buildUpstreamPayload({
+          model,
+          messages,
+          stream,
+          temperature,
+          max_tokens,
+          tools,
+          tool_choice,
+          parallel_tool_calls,
+        });
     const url = isNativeCatPaw ? getCatPawNativeChatUrl(baseUrl) : `${baseUrl}/chat/completions`;
     const response = await fetchImpl(url, {
       method: 'POST',
@@ -373,7 +499,10 @@ async function createChatCompletion(options) {
   const response = await requestChatCompletion({ ...options, stream: false });
   if (isCatPawAuthMode(options.env || process.env)) {
     const text = await response.text();
-    return toOpenAiCompletion(parseSseText(text, response.headers, options.env || process.env), options.model);
+    return adaptCompletionToolCalls(
+      toOpenAiCompletion(parseSseText(text, response.headers, options.env || process.env), options.model),
+      options.tools
+    );
   }
   const payload = await readResponsePayload(response, options.env || process.env);
   if (payload && typeof payload === 'object' && 'code' in payload && 'data' in payload) {

@@ -13,6 +13,7 @@
 - 提供 OpenAI 兼容的 `POST /v1/chat/completions`
 - 提供 OpenAI 兼容的 `GET /v1/models`
 - 支持非流式和流式响应
+- 实验性支持非流式工具调用适配，可接收 OpenAI `tools`
 - 支持 CatPawAI 请求加密和响应解密
 - 支持从 Windows CatPawAI 本地登录态导入 token
 - 支持 Ubuntu systemd 后台服务部署
@@ -117,6 +118,23 @@ npm run configure-auth
 `catpawai-cn-text` 是中文文本模型别名，当前映射到 `glm-5.2`。
 
 `catpawai` 是默认模型别名，映射到 `.env` 里的 `CATPAWAI_MODEL`。
+
+## 工具调用
+
+代理现在包含一个实验性的非流式工具调用适配层。客户端发送 OpenAI 兼容的 `tools` 时，代理会把严格 JSON 工具调用说明注入到 CatPawAI 原生请求里。如果模型返回类似：
+
+```json
+{"tool_calls":[{"name":"Bash","arguments":{"command":"ls"}}]}
+```
+
+代理会把它转换成 OpenAI `message.tool_calls`，并把 `finish_reason` 设为 `"tool_calls"`，让 Claude Code 这类客户端有机会真正执行工具。
+
+限制：
+
+- 这是基于提示词的适配，不是 CatPawAI GUI 内部 Agent 协议。
+- 稳定性取决于模型是否严格按 JSON 格式输出。
+- 暂未适配流式工具调用。
+- 如果模型返回普通文本，代理会继续按普通文本返回。
 
 ## Token 生命周期
 
