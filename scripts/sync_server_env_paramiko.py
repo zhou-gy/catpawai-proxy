@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,7 @@ DEFAULT_CONFIG_FILE = "sync-server-env.local.json"
 DEFAULT_REMOTE_DIR = "/opt/catpawai-proxy"
 DEFAULT_REMOTE_PORT = 13000
 DEFAULT_SERVICE_NAME = "catpawai-proxy"
+DEFAULT_WATCH_INTERVAL_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,17 @@ def parse_args() -> argparse.Namespace:
         "--skip-import",
         action="store_true",
         help="Upload the existing .env without running the CatPawAI local-state importer.",
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Keep running and sync only when the refreshed .env content changes.",
+    )
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=DEFAULT_WATCH_INTERVAL_SECONDS,
+        help=f"Watch interval in seconds. Default: {DEFAULT_WATCH_INTERVAL_SECONDS}",
     )
     return parser.parse_args()
 
@@ -151,6 +165,51 @@ def sync_with_paramiko(config: SyncConfig, env_path: Path) -> None:
         client.close()
 
 
+def sync_once(project_root: Path, config: SyncConfig, skip_import: bool) -> Path:
+    env_path = refresh_local_env(project_root, skip_import)
+    update_remote_port(env_path, config.remotePort)
+    sync_with_paramiko(config, env_path)
+    return env_path
+
+
+def run_watch(project_root: Path, config: SyncConfig, skip_import: bool, interval: int) -> int:
+    if interval < 30:
+        raise ValueError("Watch interval must be at least 30 seconds.")
+
+    last_hash = ""
+    print(f"Watch mode started. Interval: {interval} seconds. Press Ctrl+C to stop.")
+    while True:
+        try:
+            env_path = refresh_local_env(project_root, skip_import)
+            update_remote_port(env_path, config.remotePort)
+            current_hash = file_hash(env_path)
+            if current_hash != last_hash:
+                sync_with_paramiko(config, env_path)
+                last_hash = current_hash
+                print(f"Synced .env and restarted {config.serviceName} on {config.host}.")
+            else:
+                print("No .env change detected; waiting for next check.")
+        except KeyboardInterrupt:
+            print("Watch mode stopped.")
+            return 0
+        except Exception as exc:
+            print(f"Watch iteration failed: {exc}", file=sys.stderr)
+
+        try:
+            time.sleep(interval)
+        except KeyboardInterrupt:
+            print("Watch mode stopped.")
+            return 0
+
+
+def file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def build_restart_command(config: SyncConfig) -> str:
     remote_dir = shlex.quote(config.remoteDir)
     service_name = shlex.quote(config.serviceName)
@@ -182,9 +241,9 @@ def main() -> int:
 
     try:
         config = load_config(config_path)
-        env_path = refresh_local_env(project_root, args.skip_import)
-        update_remote_port(env_path, config.remotePort)
-        sync_with_paramiko(config, env_path)
+        if args.watch:
+            return run_watch(project_root, config, args.skip_import, args.interval)
+        sync_once(project_root, config, args.skip_import)
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

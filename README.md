@@ -137,6 +137,14 @@ notepad sync-server-env.local.json
 
 `sync-server-env.local.json` may contain your SSH password for personal use, but it is ignored by Git and must not be published.
 
+For double-click automatic sync, run:
+
+```text
+watch-sync-server-env-paramiko.cmd
+```
+
+It checks every `300` seconds by default. Edit `WATCH_INTERVAL_SECONDS` inside the `.cmd` file if you want a different interval. It uploads and restarts the service only when the refreshed `.env` content changes.
+
 ## Ubuntu Deployment
 
 See [UBUNTU_DEPLOY.md](UBUNTU_DEPLOY.md).

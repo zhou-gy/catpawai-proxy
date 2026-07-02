@@ -151,6 +151,14 @@ notepad sync-server-env.local.json
 
 `sync-server-env.local.json` 可以填你的服务器地址、用户名和 SSH 密码，方便个人长期使用。这个文件已经被 Git 忽略，不要上传到 GitHub。
 
+如果想双击后一直自动同步，运行：
+
+```text
+watch-sync-server-env-paramiko.cmd
+```
+
+默认每 `300` 秒检查一次。想改时间就编辑这个 `.cmd` 文件里的 `WATCH_INTERVAL_SECONDS`。脚本只会在刷新后的 `.env` 内容变化时上传并重启服务。
+
 ## Ubuntu 部署
 
 详见 [UBUNTU_DEPLOY.md](UBUNTU_DEPLOY.md)。

@@ -85,6 +85,14 @@ notepad sync-server-env.local.json
 
 `sync-server-env.local.json` is ignored by Git and may contain your private SSH settings for local personal use only.
 
+For double-click automatic sync, run:
+
+```text
+watch-sync-server-env-paramiko.cmd
+```
+
+It checks every `300` seconds by default. Edit `WATCH_INTERVAL_SECONDS` inside the `.cmd` file if you want a different interval. It uploads and restarts the service only when the refreshed `.env` content changes.
+
 ## Gateway Usage
 
 Keep `HOST=127.0.0.1` when this proxy is behind your gateway on the same server.
