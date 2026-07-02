@@ -4,6 +4,10 @@
 
 英文文档：[README.md](README.md)
 
+## 免责声明
+
+本项目仅用于本机学习、研究和个人集成测试，不是 CatPawAI 或 OpenAI 官方项目，也不是公开模型服务。不要将本服务直接暴露到公网。服务器部署如有使用，仅限个人在自有鉴权网关后的私有测试场景。
+
 ## 功能
 
 - 提供 OpenAI 兼容的 `POST /v1/chat/completions`
@@ -131,14 +135,16 @@ npm run configure-auth
 可以直接运行：
 
 ```powershell
-.\sync-server-env.cmd
+.\sync-server-env.cmd user@host
 ```
 
-这个脚本会重新读取本机 CatPawAI 登录态、更新 `.env`、上传到 Ubuntu，并重启 `catpawai-proxy` 服务。脚本使用系统的 `ssh` 和 `scp`，不会保存服务器密码。
+也可以先设置 `CATPAWAI_PROXY_SERVER=user@host`，再运行 `.\sync-server-env.cmd`。这个脚本会重新读取本机 CatPawAI 登录态、更新 `.env`、上传到 Ubuntu，并重启 `catpawai-proxy` 服务。脚本使用系统的 `ssh` 和 `scp`，不会保存服务器密码，仓库里也不包含默认服务器地址。
 
 ## Ubuntu 部署
 
 详见 [UBUNTU_DEPLOY.md](UBUNTU_DEPLOY.md)。
+
+Ubuntu 部署是可选能力，仅用于个人在自有鉴权网关后的私有测试。代理服务本身仍建议保持绑定 `127.0.0.1`。
 
 ## GitHub 上传说明
 
@@ -150,6 +156,8 @@ npm run configure-auth
 - `vendor/catpaw-extension/extension.js`
 
 `.gitignore` 已经排除了这些文件。
+
+不要公开上传服务器专用 `.env`、CatPawAI 导出文件、token、cookie、authorization header、网关 key、服务器地址或密码。
 
 ## 接口
 

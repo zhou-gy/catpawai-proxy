@@ -1,6 +1,8 @@
 # Ubuntu Deployment
 
-This proxy can run on Ubuntu as a local upstream behind your gateway.
+This proxy can run on Ubuntu as a local upstream behind your own authenticated gateway.
+
+Disclaimer: Ubuntu deployment is optional and intended only for private personal testing. Do not expose this proxy directly to the public internet, and do not publish server-specific `.env` files, tokens, copied CatPawAI assets, server addresses, or passwords.
 
 ## Before Uploading From Windows
 
@@ -67,10 +69,10 @@ The token in `.env` is a snapshot. It usually does not change only because the C
 From Windows, you can refresh and sync the server `.env` with:
 
 ```powershell
-.\sync-server-env.cmd
+.\sync-server-env.cmd user@host
 ```
 
-The helper uses `ssh` and `scp`. It does not store a server password.
+You can also set `CATPAWAI_PROXY_SERVER=user@host` and then run `.\sync-server-env.cmd`. The helper uses `ssh` and `scp`. It does not store a server password, and the repository does not include a default server address.
 
 ## Gateway Usage
 

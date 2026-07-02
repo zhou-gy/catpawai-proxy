@@ -6,6 +6,10 @@ This project exposes CatPawAI chat access through a local `/v1` API so it can be
 
 Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
 
+## Disclaimer
+
+This project is intended for local learning, research, and personal integration testing only. It is not an official CatPawAI or OpenAI project, not a public model service, and should not be exposed directly to the internet. Any server-side usage should remain a private personal test behind your own authenticated gateway.
+
 ## Features
 
 - OpenAI-compatible `POST /v1/chat/completions`
@@ -117,14 +121,16 @@ Refresh `.env` when CatPawAI requires a new login or the proxy returns `401 auth
 To refresh the local token and sync `.env` to the Ubuntu service:
 
 ```powershell
-.\sync-server-env.cmd
+.\sync-server-env.cmd user@host
 ```
 
-The sync helper uses `ssh` and `scp`. It does not store a server password.
+You can also set `CATPAWAI_PROXY_SERVER=user@host` and then run `.\sync-server-env.cmd`. The sync helper uses `ssh` and `scp`. It does not store a server password, and the repository does not include a default server address.
 
 ## Ubuntu Deployment
 
 See [UBUNTU_DEPLOY.md](UBUNTU_DEPLOY.md).
+
+Ubuntu deployment is optional and intended only for private personal testing behind your own authenticated gateway. Keep the proxy itself bound to `127.0.0.1`.
 
 ## GitHub Safety
 
@@ -136,6 +142,8 @@ This repository can be published, but keep these files out of Git:
 - `vendor/catpaw-extension/extension.js`
 
 The included `.gitignore` excludes them.
+
+Do not publish server-specific `.env` files, exported CatPawAI assets, tokens, cookies, authorization headers, gateway keys, server addresses, or passwords.
 
 ## Endpoints
 

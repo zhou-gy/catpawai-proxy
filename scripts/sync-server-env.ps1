@@ -1,5 +1,5 @@
 param(
-  [string]$Server = "kingdom@120.48.71.69",
+  [string]$Server = $env:CATPAWAI_PROXY_SERVER,
   [string]$RemoteDir = "/opt/catpawai-proxy",
   [int]$RemotePort = 13000,
   [string]$ServiceName = "catpawai-proxy"
@@ -9,6 +9,10 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 $envPath = Join-Path $projectRoot ".env"
+
+if ([string]::IsNullOrWhiteSpace($Server)) {
+  throw "Missing server. Run .\sync-server-env.cmd user@host or set CATPAWAI_PROXY_SERVER=user@host."
+}
 
 Push-Location $projectRoot
 try {
