@@ -20,7 +20,7 @@ DEFAULT_CONFIG_FILE = "sync-server-env.local.json"
 DEFAULT_REMOTE_DIR = "/opt/catpawai-proxy"
 DEFAULT_REMOTE_PORT = 13000
 DEFAULT_SERVICE_NAME = "catpawai-proxy"
-DEFAULT_WATCH_INTERVAL_SECONDS = 300
+DEFAULT_WATCH_INTERVAL_SECONDS = 30
 
 
 @dataclass(frozen=True)

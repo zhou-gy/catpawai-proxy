@@ -91,7 +91,7 @@ For double-click automatic sync, run:
 watch-sync-server-env-paramiko.cmd
 ```
 
-It checks every `300` seconds by default. Edit `WATCH_INTERVAL_SECONDS` inside the `.cmd` file if you want a different interval. It uploads and restarts the service only when the refreshed `.env` content changes.
+It checks every `30` seconds by default. Each check refreshes the local `.env` first, compares its content hash, and connects to the server only when `.env` changes. Edit `WATCH_INTERVAL_SECONDS` inside the `.cmd` file if you want a different interval.
 
 ## Gateway Usage
 

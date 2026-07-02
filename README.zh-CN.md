@@ -157,7 +157,7 @@ notepad sync-server-env.local.json
 watch-sync-server-env-paramiko.cmd
 ```
 
-默认每 `300` 秒检查一次。想改时间就编辑这个 `.cmd` 文件里的 `WATCH_INTERVAL_SECONDS`。脚本只会在刷新后的 `.env` 内容变化时上传并重启服务。
+默认每 `30` 秒检查一次。每次都会先在本地刷新 `.env`，比较内容 hash，只有 `.env` 变化时才连接服务器上传并重启服务。想改时间就编辑这个 `.cmd` 文件里的 `WATCH_INTERVAL_SECONDS`。
 
 ## Ubuntu 部署
 
