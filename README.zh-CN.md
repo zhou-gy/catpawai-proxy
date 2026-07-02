@@ -116,7 +116,7 @@ npm run configure-auth
 
 ## Token 生命周期
 
-CatPawAI token 来自本机 CatPawAI 登录态。一般不会因为关闭 CatPawAI IDE 或电脑关机就立刻变化。
+`.env` 里的 CatPawAI token 只是从本机 CatPawAI 登录态复制出来的一份快照。一般不会因为关闭 CatPawAI IDE 或电脑关机就立刻变化，但 CatPawAI 可能在 IDE 仍然登录的情况下刷新或废弃旧 access token。
 
 这些情况可能导致 token 变化或失效：
 
@@ -127,6 +127,14 @@ CatPawAI token 来自本机 CatPawAI 登录态。一般不会因为关闭 CatPaw
 - 服务端强制刷新登录态
 
 如果代理返回 `401 auth failed`，就在 Windows 上重新生成 `.env`，上传到服务器覆盖，然后重启服务。
+
+可以直接运行：
+
+```powershell
+.\sync-server-env.cmd
+```
+
+这个脚本会重新读取本机 CatPawAI 登录态、更新 `.env`、上传到 Ubuntu，并重启 `catpawai-proxy` 服务。脚本使用系统的 `ssh` 和 `scp`，不会保存服务器密码。
 
 ## Ubuntu 部署
 

@@ -110,9 +110,17 @@ Useful model ids include:
 
 ## Token Lifetime
 
-The CatPawAI token is copied from the local CatPawAI login state. It usually does not change only because the CatPawAI IDE is closed or the Windows computer is shut down.
+The CatPawAI token in `.env` is only a snapshot copied from the local CatPawAI login state. It usually does not change only because the CatPawAI IDE is closed or the Windows computer is shut down, but CatPawAI can refresh or invalidate the access token while the IDE is still logged in.
 
 Refresh `.env` when CatPawAI requires a new login or the proxy returns `401 auth failed`.
+
+To refresh the local token and sync `.env` to the Ubuntu service:
+
+```powershell
+.\sync-server-env.cmd
+```
+
+The sync helper uses `ssh` and `scp`. It does not store a server password.
 
 ## Ubuntu Deployment
 

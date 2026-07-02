@@ -62,7 +62,15 @@ If the CatPawAI token expires, regenerate `.env` on Windows, upload it to the sa
 sudo systemctl restart catpawai-proxy
 ```
 
-The token usually does not change only because the CatPawAI IDE is closed or the Windows computer is shut down. Refresh it when CatPawAI requires a new login or the proxy returns `401 auth failed`.
+The token in `.env` is a snapshot. It usually does not change only because the CatPawAI IDE is closed or the Windows computer is shut down, but CatPawAI can refresh or invalidate the access token while the IDE is still logged in. Refresh it when CatPawAI requires a new login or the proxy returns `401 auth failed`.
+
+From Windows, you can refresh and sync the server `.env` with:
+
+```powershell
+.\sync-server-env.cmd
+```
+
+The helper uses `ssh` and `scp`. It does not store a server password.
 
 ## Gateway Usage
 
