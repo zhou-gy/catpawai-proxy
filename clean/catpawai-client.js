@@ -127,9 +127,29 @@ function buildToolInstruction(tools) {
   ].join('\n');
 }
 
+function hasToolResultMessage(messages) {
+  return Array.isArray(messages) && messages.some((message) => message?.role === 'tool');
+}
+
+function buildToolResultContinuationInstruction(tools) {
+  const toolNames = tools.map(getToolName).filter(Boolean).join(', ');
+  return [
+    'Continue the original user task using the available tools.',
+    'You have received tool results from the workspace. Do not summarize them unless the user only asked for a summary.',
+    'If the original task asks to fix, modify, update, create, delete, or repair a file, call Edit or Write now.',
+    'Respond with strict JSON tool-call format only when continuing with a tool.',
+    `Available tool names: ${toolNames}`,
+  ].join('\n');
+}
+
 function buildMessagesWithToolInstruction(messages, tools) {
   if (!hasTools(tools)) return messages;
-  return [{ role: 'system', content: buildToolInstruction(tools) }, ...messages];
+  const instruction = buildToolInstruction(tools);
+  const result = [{ role: 'system', content: instruction }, ...messages, { role: 'system', content: instruction }];
+  if (hasToolResultMessage(messages)) {
+    result.push({ role: 'user', content: buildToolResultContinuationInstruction(tools) });
+  }
+  return result;
 }
 
 function buildUpstreamPayload({
@@ -171,18 +191,49 @@ function messageContentToText(content) {
     .join('\n');
 }
 
+function toolCallsToText(toolCalls) {
+  if (!Array.isArray(toolCalls) || !toolCalls.length) return '';
+  return toolCalls
+    .map((call) => {
+      const name = call?.function?.name || call?.name || 'tool';
+      const args = call?.function?.arguments || call?.arguments || '{}';
+      return `Tool call requested: ${name} ${args}`;
+    })
+    .join('\n');
+}
+
+function normalizeCatPawMessage(message) {
+  const content = messageContentToText(message.content);
+  if (message.role === 'tool') {
+    return {
+      role: 'user',
+      content: `Tool result${message.tool_call_id ? ` for ${message.tool_call_id}` : ''}:\n${content}`,
+    };
+  }
+  const toolCallText = toolCallsToText(message.tool_calls);
+  if (toolCallText && !content) {
+    return { role: message.role, content: toolCallText };
+  }
+  if (toolCallText) {
+    return { role: message.role, content: `${content}\n${toolCallText}` };
+  }
+  return { role: message.role, content };
+}
+
 function buildCatPawNativePayload({ messages, tools }) {
   return {
-    messages: buildMessagesWithToolInstruction(messages, tools).map((message) => ({
-      role: message.role,
-      content: messageContentToText(message.content),
-      triggerMode: 'VSCode.Chat',
-      chatSelectContextTagList: [],
-      attachedCodeChunks: [],
-      attachedDocChunks: [],
-      attachedWebPages: [],
-      extraContextList: [],
-    })),
+    messages: buildMessagesWithToolInstruction(messages, tools)
+      .map(normalizeCatPawMessage)
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+        triggerMode: 'VSCode.Chat',
+        chatSelectContextTagList: [],
+        attachedCodeChunks: [],
+        attachedDocChunks: [],
+        attachedWebPages: [],
+        extraContextList: [],
+      })),
     before: '',
     selectedCode: '',
     after: '',
@@ -352,15 +403,89 @@ function normalizeToolArguments(call) {
   return parsed && typeof parsed === 'object' ? parsed : { value };
 }
 
-function convertTextToToolCalls(text, tools) {
+function getToolParameters(tool) {
+  return tool?.function?.parameters || tool?.input_schema || tool?.parameters || {};
+}
+
+function getToolByName(tools, name) {
+  const lowerName = name.toLowerCase();
+  return tools.find((tool) => getToolName(tool).toLowerCase() === lowerName);
+}
+
+function getFirstPathArgumentName(tool) {
+  const schema = getToolParameters(tool);
+  const required = Array.isArray(schema?.required) ? schema.required : [];
+  const properties = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
+  const names = [...required, ...Object.keys(properties)];
+  return names.find((name) => /^(file_?path|path|filename|file)$/i.test(name)) || 'file_path';
+}
+
+function extractMentionedFilePath(text) {
+  const matches = String(text || '').match(/[A-Za-z0-9_.@()[\]-]+(?:[\\/][A-Za-z0-9_.@()[\]-]+)*\.[A-Za-z0-9]+/g);
+  return matches?.[0] || '';
+}
+
+function normalizePathKey(value) {
+  return String(value || '').replace(/\\/g, '/').toLowerCase();
+}
+
+function getPathFromArguments(args) {
+  if (!args || typeof args !== 'object') return '';
+  return args.file_path || args.filePath || args.path || args.filename || args.file || '';
+}
+
+function getCompletedReadPaths(messages) {
+  const pendingReads = new Map();
+  const completed = new Set();
+  for (const message of messages || []) {
+    for (const call of message?.tool_calls || []) {
+      const name = call?.function?.name || call?.name || '';
+      if (name.toLowerCase() !== 'read') continue;
+      const args = normalizeToolArguments(call);
+      const filePath = getPathFromArguments(args);
+      if (call.id && filePath) pendingReads.set(call.id, normalizePathKey(filePath));
+    }
+    if (message?.role === 'tool' && message.tool_call_id && pendingReads.has(message.tool_call_id)) {
+      completed.add(pendingReads.get(message.tool_call_id));
+    }
+  }
+  return completed;
+}
+
+function inferToolCallsFromText(text, tools, messages) {
+  const readTool = getToolByName(tools, 'Read');
+  if (!readTool) return [];
+  const filePath = extractMentionedFilePath(text);
+  if (!filePath) return [];
+  if (getCompletedReadPaths(messages).has(normalizePathKey(filePath))) return [];
+  if (!/(read|inspect|open|查看|读取|读一下|先读|先读取|文件内容)/i.test(text)) return [];
+  return [
+    {
+      name: getToolName(readTool),
+      arguments: { [getFirstPathArgumentName(readTool)]: filePath },
+    },
+  ];
+}
+
+function isRedundantReadCall(call, completedReadPaths) {
+  if ((call.name || '').toLowerCase() !== 'read') return false;
+  const filePath = getPathFromArguments(call.arguments);
+  return filePath ? completedReadPaths.has(normalizePathKey(filePath)) : false;
+}
+
+function convertTextToToolCalls(text, tools, messages = []) {
   if (!hasTools(tools)) return [];
   const allowedToolNames = new Set(tools.map(getToolName).filter(Boolean));
-  return normalizeToolCallItems(parseToolJson(text))
+  const completedReadPaths = getCompletedReadPaths(messages);
+  const explicitCalls = normalizeToolCallItems(parseToolJson(text));
+  const inferredCalls = explicitCalls.length ? [] : inferToolCallsFromText(text, tools, messages);
+  return [...explicitCalls, ...inferredCalls]
     .map((call) => ({
       name: call.name || call.tool || call.function?.name,
       arguments: normalizeToolArguments(call),
     }))
     .filter((call) => call.name && (!allowedToolNames.size || allowedToolNames.has(call.name)))
+    .filter((call) => !isRedundantReadCall(call, completedReadPaths))
     .map((call, index) => ({
       id: `call_${Date.now()}_${index}`,
       type: 'function',
@@ -371,11 +496,11 @@ function convertTextToToolCalls(text, tools) {
     }));
 }
 
-function adaptCompletionToolCalls(completion, tools) {
+function adaptCompletionToolCalls(completion, tools, messages = []) {
   const choice = completion?.choices?.[0];
   const content = choice?.message?.content;
   if (typeof content !== 'string') return completion;
-  const toolCalls = convertTextToToolCalls(content, tools);
+  const toolCalls = convertTextToToolCalls(content, tools, messages);
   if (!toolCalls.length) return completion;
   return {
     ...completion,
@@ -526,7 +651,8 @@ async function createChatCompletion(options) {
     const text = await response.text();
     return adaptCompletionToolCalls(
       toOpenAiCompletion(parseSseText(text, response.headers, options.env || process.env), options.model),
-      options.tools
+      options.tools,
+      options.messages
     );
   }
   const payload = await readResponsePayload(response, options.env || process.env);

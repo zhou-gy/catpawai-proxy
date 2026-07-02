@@ -120,6 +120,130 @@ test('buildCatPawNativePayload instructs file tasks to call tools', () => {
   assert.match(instruction, /Never claim/);
 });
 
+test('buildCatPawNativePayload converts tool results to user-readable text', () => {
+  const payload = buildCatPawNativePayload({
+    messages: [
+      { role: 'user', content: 'Fix AGENTS.md' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'Read', arguments: '{"file_path":"AGENTS.md"}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: '# AGENTS.md\n乱码' },
+    ],
+    tools: [],
+  });
+
+  assert.equal(payload.messages[1].role, 'assistant');
+  assert.match(payload.messages[1].content, /Read/);
+  assert.equal(payload.messages[2].role, 'user');
+  assert.match(payload.messages[2].content, /Tool result/);
+  assert.match(payload.messages[2].content, /乱码/);
+});
+
+test('createChatCompletion converts promised file reads to Read tool calls', async () => {
+  const fetchImpl = async () => {
+    const text = [
+      'data: {"id":"chatcmpl-read","object":"chat.completion.chunk","created":1,"model":"glm-5.2","content":"接下来会先读取 AGENTS.md 文件内容，确认乱码段落。","finishReason":"stop"}',
+      '',
+    ].join('\n');
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      text: async () => text,
+    };
+  };
+
+  const result = await createChatCompletion({
+    model: 'glm-5.2',
+    messages: [{ role: 'user', content: '我的AGENTS.md乱码了 帮我修正一下' }],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'Read',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { file_path: { type: 'string' } }, required: ['file_path'] },
+        },
+      },
+    ],
+    env: {
+      CATPAWAI_OPENAI_BASE_URL: 'https://catpaw.meituan.com/api/gpt',
+      CATPAWAI_AUTH_MODE: 'catpaw',
+      CATPAWAI_ACCESS_TOKEN: 'token-123',
+      CATPAWAI_MIS_ID: 'user-a',
+      CATPAWAI_ENCRYPTION: 'false',
+    },
+    fetchImpl,
+  });
+
+  assert.equal(result.choices[0].finish_reason, 'tool_calls');
+  assert.equal(result.choices[0].message.tool_calls[0].function.name, 'Read');
+  assert.equal(result.choices[0].message.tool_calls[0].function.arguments, '{"file_path":"AGENTS.md"}');
+});
+
+test('createChatCompletion does not infer duplicate Read after a tool result', async () => {
+  const fetchImpl = async () => {
+    const text = [
+      'data: {"id":"chatcmpl-read-again","object":"chat.completion.chunk","created":1,"model":"glm-5.2","content":"{\\"tool_calls\\":[{\\"name\\":\\"Read\\",\\"arguments\\":{\\"file_path\\":\\"AGENTS.md\\"}}]}","finishReason":"stop"}',
+      '',
+    ].join('\n');
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      text: async () => text,
+    };
+  };
+
+  const result = await createChatCompletion({
+    model: 'glm-5.2',
+    messages: [
+      { role: 'user', content: '我的AGENTS.md乱码了 帮我修正一下' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'Read', arguments: '{"file_path":"AGENTS.md"}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: '# AGENTS.md\n乱码' },
+    ],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'Read',
+          description: 'Read a file',
+          parameters: { type: 'object', properties: { file_path: { type: 'string' } }, required: ['file_path'] },
+        },
+      },
+    ],
+    env: {
+      CATPAWAI_OPENAI_BASE_URL: 'https://catpaw.meituan.com/api/gpt',
+      CATPAWAI_AUTH_MODE: 'catpaw',
+      CATPAWAI_ACCESS_TOKEN: 'token-123',
+      CATPAWAI_MIS_ID: 'user-a',
+      CATPAWAI_ENCRYPTION: 'false',
+    },
+    fetchImpl,
+  });
+
+  assert.equal(result.choices[0].message.tool_calls, undefined);
+  assert.match(result.choices[0].message.content, /Read/);
+});
+
 test('buildCatPawHeaders creates CatPaw authentication headers', () => {
   const headers = buildCatPawHeaders({
     CATPAWAI_ACCESS_TOKEN: 'token-123',
