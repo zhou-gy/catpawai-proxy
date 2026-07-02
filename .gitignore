@@ -3,8 +3,12 @@
 !.env.example
 node_modules/
 npm-debug.log*
+__pycache__/
+*.py[cod]
 
 vendor/catpaw-extension/extension.js
+
+sync-server-env.local.json
 
 .DS_Store
 Thumbs.db

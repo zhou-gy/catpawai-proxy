@@ -20,6 +20,7 @@
 - `.env.*`
 - `node_modules/`
 - `vendor/catpaw-extension/extension.js`
+- `sync-server-env.local.json`
 - 任何从 CatPawAI 本地状态、浏览器请求或服务器环境中导出的 token、cookie、authorization header、API key
 - 个人服务器地址、SSH 密码、网关 key 或其他私密运维信息
 

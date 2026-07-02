@@ -74,6 +74,17 @@ From Windows, you can refresh and sync the server `.env` with:
 
 You can also set `CATPAWAI_PROXY_SERVER=user@host` and then run `.\sync-server-env.cmd`. The helper uses `ssh` and `scp`. It does not store a server password, and the repository does not include a default server address.
 
+For personal password-based sync from Windows, you can use the Paramiko helper:
+
+```powershell
+python -m pip install -r requirements-python.txt
+Copy-Item sync-server-env.local.example.json sync-server-env.local.json
+notepad sync-server-env.local.json
+.\sync-server-env-paramiko.cmd
+```
+
+`sync-server-env.local.json` is ignored by Git and may contain your private SSH settings for local personal use only.
+
 ## Gateway Usage
 
 Keep `HOST=127.0.0.1` when this proxy is behind your gateway on the same server.

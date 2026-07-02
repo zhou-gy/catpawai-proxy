@@ -140,6 +140,17 @@ npm run configure-auth
 
 也可以先设置 `CATPAWAI_PROXY_SERVER=user@host`，再运行 `.\sync-server-env.cmd`。这个脚本会重新读取本机 CatPawAI 登录态、更新 `.env`、上传到 Ubuntu，并重启 `catpawai-proxy` 服务。脚本使用系统的 `ssh` 和 `scp`，不会保存服务器密码，仓库里也不包含默认服务器地址。
 
+如果你想在自己的电脑上长期保存 SSH 密码，可以使用 Paramiko 版本的私有同步脚本：
+
+```powershell
+python -m pip install -r requirements-python.txt
+Copy-Item sync-server-env.local.example.json sync-server-env.local.json
+notepad sync-server-env.local.json
+.\sync-server-env-paramiko.cmd
+```
+
+`sync-server-env.local.json` 可以填你的服务器地址、用户名和 SSH 密码，方便个人长期使用。这个文件已经被 Git 忽略，不要上传到 GitHub。
+
 ## Ubuntu 部署
 
 详见 [UBUNTU_DEPLOY.md](UBUNTU_DEPLOY.md)。
@@ -154,6 +165,7 @@ Ubuntu 部署是可选能力，仅用于个人在自有鉴权网关后的私有�
 - `.env.*`
 - `node_modules/`
 - `vendor/catpaw-extension/extension.js`
+- `sync-server-env.local.json`
 
 `.gitignore` 已经排除了这些文件。
 

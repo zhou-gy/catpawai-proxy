@@ -126,6 +126,17 @@ To refresh the local token and sync `.env` to the Ubuntu service:
 
 You can also set `CATPAWAI_PROXY_SERVER=user@host` and then run `.\sync-server-env.cmd`. The sync helper uses `ssh` and `scp`. It does not store a server password, and the repository does not include a default server address.
 
+If you want a private password-based sync helper for your own machines, install Paramiko and create a local ignored config file:
+
+```powershell
+python -m pip install -r requirements-python.txt
+Copy-Item sync-server-env.local.example.json sync-server-env.local.json
+notepad sync-server-env.local.json
+.\sync-server-env-paramiko.cmd
+```
+
+`sync-server-env.local.json` may contain your SSH password for personal use, but it is ignored by Git and must not be published.
+
 ## Ubuntu Deployment
 
 See [UBUNTU_DEPLOY.md](UBUNTU_DEPLOY.md).
@@ -140,6 +151,7 @@ This repository can be published, but keep these files out of Git:
 - `.env.*`
 - `node_modules/`
 - `vendor/catpaw-extension/extension.js`
+- `sync-server-env.local.json`
 
 The included `.gitignore` excludes them.
 

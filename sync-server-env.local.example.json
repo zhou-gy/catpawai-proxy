@@ -1,0 +1,10 @@
+{
+  "host": "your.server.ip",
+  "port": 22,
+  "username": "your-user",
+  "password": "your-ssh-password",
+  "sudoPassword": "your-sudo-password-or-empty-to-use-ssh-password",
+  "remoteDir": "/opt/catpawai-proxy",
+  "remotePort": 13000,
+  "serviceName": "catpawai-proxy"
+}
