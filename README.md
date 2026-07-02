@@ -1,17 +1,30 @@
 # CatPawAI Proxy
 
-Local-only OpenAI-compatible HTTP adapter for CatPawAI experiments.
+OpenAI-compatible local HTTP adapter for CatPawAI.
 
-本项目把 CatPawAI GUI 的可用模型代理成 OpenAI 兼容接口，方便接入你自己的网关、Claude Code 或其他支持 OpenAI API 的工具。
+This project exposes CatPawAI chat access through a local `/v1` API so it can be used behind a private gateway or by tools that support the OpenAI API format.
+
+Chinese documentation: [README.zh-CN.md](README.zh-CN.md)
+
+## Features
+
+- OpenAI-compatible `POST /v1/chat/completions`
+- OpenAI-compatible `GET /v1/models`
+- Non-streaming and streaming response support
+- CatPawAI request encryption and response decoding
+- Windows local state import helper
+- Ubuntu systemd deployment helper
+- Local-only binding by default
 
 ## Safety
 
-- Bind to `127.0.0.1` only.
-- Do not expose this service to the public internet.
-- Do not paste CatPawAI tokens into third-party clients.
+- Keep the service bound to `127.0.0.1`.
+- Do not expose this proxy directly to the public internet.
+- Put it behind your own authenticated gateway if remote access is required.
+- Never commit `.env` or copied CatPawAI extension files.
 - Logs redact common token and API key patterns.
 
-## Start
+## Quick Start
 
 ```powershell
 npm install
@@ -19,27 +32,23 @@ Copy-Item .env.example .env
 npm start
 ```
 
-Base URL:
+Default base URL:
 
 ```text
 http://127.0.0.1:13000/v1
 ```
 
-API key can be any local placeholder for clients that require one.
+The API key can be any local placeholder if a client requires one.
 
-If Windows reports `EACCES` on port `13000`, that port is reserved by the OS. Check with:
+## Windows Port Note
+
+Some Windows installations reserve port `13000`. If Node.js reports `EACCES` for `127.0.0.1:13000`, check the excluded port ranges:
 
 ```powershell
 netsh interface ipv4 show excludedportrange protocol=tcp
 ```
 
-Use a nearby free local port such as `13046`, or remove the reservation only if you know why Windows reserved it. The Ubuntu service can still use `13000`.
-
-Run a local diagnosis:
-
-```powershell
-npm run diagnose
-```
+Use a nearby free local port such as `13046`, or keep `13000` only on Ubuntu. The server deployment can still use `13000`.
 
 ## Configuration
 
@@ -55,19 +64,7 @@ CATPAWAI_API_KEY=
 CATPAWAI_MODEL=deepseek-v3.2
 CATPAWAI_IDE_VERSION=2026.2.3
 CATPAWAI_PLUGIN_VERSION=2026.2.2
-CATPAWAI_CLI_PATH=D:\Programs\CatPawAI\bin\catpawai.cmd
-```
-
-The installed `catpawai.cmd` is an editor CLI and does not expose direct prompt completion. The closest direct chat endpoint found in the installed extension is:
-
-```text
-https://catpaw.meituan.com/api/gpt/chat/completions
-```
-
-So the proxy base URL should be:
-
-```env
-CATPAWAI_OPENAI_BASE_URL=https://catpaw.meituan.com/api/gpt
+CATPAWAI_TIMEOUT_MS=300000
 ```
 
 Internal tenant users may need:
@@ -77,53 +74,60 @@ CATPAWAI_OPENAI_BASE_URL=https://catpaw.sankuai.com/api/gpt
 CATPAWAI_TENANT=4391f0be98
 ```
 
-For CatPaw-authenticated requests, set `CATPAWAI_AUTH_MODE=catpaw`, `CATPAWAI_ACCESS_TOKEN`, and, if available, `CATPAWAI_MIS_ID`. The proxy sends the token as `Catpaw-Auth` plus the CatPaw cookie names observed in the extension. It does not read CatPawAI cached login files automatically.
-
-To import auth from copied request headers without printing the token:
-
-```powershell
-npm run configure-auth
-```
-
-Paste the CatPawAI request headers, then finish with a line containing only `END`.
-
-On Windows you can also copy the headers, then double-click:
-
-```text
-import-catpaw-auth.cmd
-```
-
-If CatPawAI shows a `config.toml` with an OpenAI-compatible proxy provider, copy that file instead and double-click:
-
-```text
-import-catpaw-config.cmd
-```
+## Importing CatPawAI Auth
 
 To import CatPawAI's already logged-in local state without printing the token:
+
+```powershell
+npm run import-from-catpaw-state
+```
+
+Or double-click:
 
 ```text
 import-from-catpaw-state.cmd
 ```
 
-该脚本会把本机 CatPawAI 登录态写入 `.env`，不会打印 token 内容。当前默认端口是 `13000`。
+If you need to import copied request headers instead:
+
+```powershell
+npm run configure-auth
+```
 
 ## Models
 
-`GET /v1/models` returns CatPawAI model ids and local aliases. Useful ids include:
+Useful model ids include:
 
 - `deepseek-v3.2`
 - `glm-5.2`
 - `kimi-k2.6`
-- `catpawai-cn-text`：中文文本模型别名，当前映射到 `glm-5.2`
-- `catpawai`：默认模型别名，映射到 `.env` 里的 `CATPAWAI_MODEL`
+- `catpawai-cn-text`
+- `catpawai`
+
+`catpawai-cn-text` is a local alias currently mapped to `glm-5.2`.
+
+`catpawai` is the default model alias and resolves to `CATPAWAI_MODEL`.
 
 ## Token Lifetime
 
-CatPawAI token is copied from the local CatPawAI login state. It usually does **not** change just because you close the CatPawAI IDE or shut down your computer. It changes when CatPawAI refreshes or invalidates the login session, for example after logout, password/session changes, server-side expiration, or a forced re-login.
+The CatPawAI token is copied from the local CatPawAI login state. It usually does not change only because the CatPawAI IDE is closed or the Windows computer is shut down.
 
-If the proxy starts returning `401 auth failed`, refresh `.env` on the Windows machine where CatPawAI is logged in, then copy the new `.env` to the server and restart the service.
+Refresh `.env` when CatPawAI requires a new login or the proxy returns `401 auth failed`.
 
- 
+## Ubuntu Deployment
+
+See [UBUNTU_DEPLOY.md](UBUNTU_DEPLOY.md).
+
+## GitHub Safety
+
+This repository can be published, but keep these files out of Git:
+
+- `.env`
+- `.env.*`
+- `node_modules/`
+- `vendor/catpaw-extension/extension.js`
+
+The included `.gitignore` excludes them.
 
 ## Endpoints
 
