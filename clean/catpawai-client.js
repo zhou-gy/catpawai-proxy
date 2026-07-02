@@ -13,6 +13,8 @@ const DEFAULT_CATPAW_COOKIE_SECONDARY = 'f32a546874_ssoid';
 const DEFAULT_CATPAW_PRODUCT_JSON = 'D:\\Programs\\CatPawAI\\resources\\app\\product.json';
 const DEFAULT_CATPAW_EXTENSION_PACKAGE_JSON =
   'D:\\Programs\\CatPawAI\\resources\\app\\extensions\\mt-idekit.mt-idekit-code\\package.json';
+const TOOL_DESCRIPTION_LIMIT = 120;
+const TOOL_PROPERTY_LIMIT = 12;
 
 const KNOWN_FINDINGS = [
   'The installed catpawai.cmd is an editor CLI, not a prompt completion CLI.',
@@ -86,19 +88,39 @@ function getToolName(tool) {
   return tool?.function?.name || tool?.name || '';
 }
 
+function truncateText(value, limit) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(0, limit - 3))}...`;
+}
+
+function summarizeToolParameters(tool) {
+  const schema = tool?.function?.parameters || tool?.input_schema || tool?.parameters || {};
+  const properties = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
+  const required = new Set(Array.isArray(schema?.required) ? schema.required : []);
+  const names = Object.keys(properties).slice(0, TOOL_PROPERTY_LIMIT);
+  if (!names.length) return 'args: object';
+  const suffix = Object.keys(properties).length > names.length ? ', ...' : '';
+  return `args: ${names.map((name) => `${name}${required.has(name) ? '*' : ''}`).join(', ')}${suffix}`;
+}
+
+function summarizeTool(tool) {
+  const name = getToolName(tool) || 'tool';
+  const description = truncateText(tool?.function?.description || tool?.description || '', TOOL_DESCRIPTION_LIMIT);
+  const params = summarizeToolParameters(tool);
+  return `- ${name}: ${description || 'No description'} (${params})`;
+}
+
 function buildToolInstruction(tools) {
-  const toolSummaries = tools.map((tool) => ({
-    name: getToolName(tool),
-    description: tool?.function?.description || tool?.description || '',
-    parameters: tool?.function?.parameters || tool?.input_schema || tool?.parameters || {},
-  }));
   return [
     'You can call tools, but this API only accepts a strict JSON tool-call response.',
     'When a tool is needed, respond with JSON only and no prose.',
     'Use exactly this shape:',
     '{"tool_calls":[{"name":"ToolName","arguments":{"arg":"value"}}]}',
     'If no tool is needed, answer normally.',
-    `Available tools: ${JSON.stringify(toolSummaries)}`,
+    'Required argument names are marked with *.',
+    'Available tools:',
+    ...tools.map(summarizeTool),
   ].join('\n');
 }
 

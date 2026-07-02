@@ -55,6 +55,38 @@ test('buildCatPawNativePayload maps OpenAI messages to CatPaw chat shape', () =>
   assert.equal(payload.messages[0].triggerMode, 'VSCode.Chat');
 });
 
+test('buildCatPawNativePayload keeps large tool instructions compact', () => {
+  const verboseDescription = 'very long description '.repeat(200);
+  const tools = Array.from({ length: 24 }, (_, index) => ({
+    type: 'function',
+    function: {
+      name: `Tool${index}`,
+      description: verboseDescription,
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: verboseDescription },
+          command: { type: 'string', description: verboseDescription },
+        },
+        required: ['path'],
+      },
+    },
+  }));
+
+  const payload = buildCatPawNativePayload({
+    messages: [{ role: 'user', content: 'fix files' }],
+    tools,
+  });
+
+  const instruction = payload.messages[0].content;
+  assert.equal(payload.messages[0].role, 'system');
+  assert.match(instruction, /Tool0/);
+  assert.match(instruction, /path/);
+  assert.match(instruction, /command/);
+  assert.ok(instruction.length < 8000, `instruction was ${instruction.length} chars`);
+  assert.equal(instruction.includes(verboseDescription), false);
+});
+
 test('buildCatPawHeaders creates CatPaw authentication headers', () => {
   const headers = buildCatPawHeaders({
     CATPAWAI_ACCESS_TOKEN: 'token-123',
