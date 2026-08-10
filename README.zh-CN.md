@@ -12,8 +12,9 @@
 
 - 提供 OpenAI 兼容的 `POST /v1/chat/completions`
 - 提供 OpenAI 兼容的 `GET /v1/models`
+- 提供 Anthropic 兼容的 `POST /v1/messages` 与 `POST /v1/messages/count_tokens`
 - 支持非流式和流式响应
-- 实验性支持非流式工具调用适配，可接收 OpenAI `tools`
+- 支持基于提示词的工具调用适配（流式 / 非流式均可用）
 - 支持 CatPawAI 请求加密和响应解密
 - 支持从 Windows CatPawAI 本地登录态导入 token
 - 支持 Ubuntu systemd 后台服务部署
@@ -121,20 +122,30 @@ npm run configure-auth
 
 ## 工具调用
 
-代理现在包含一个实验性的非流式工具调用适配层。客户端发送 OpenAI 兼容的 `tools` 时，代理会把严格 JSON 工具调用说明注入到 CatPawAI 原生请求里。如果模型返回类似：
+CatPawAI 原生聊天接口没有 OpenAI function calling。本代理用提示词 JSON 协议做适配：
+
+1. 把严格 JSON 工具调用说明注入到 CatPawAI 原生请求；
+2. 解析模型返回的类似内容：
 
 ```json
 {"tool_calls":[{"name":"Bash","arguments":{"command":"ls"}}]}
 ```
 
-代理会把它转换成 OpenAI `message.tool_calls`，并把 `finish_reason` 设为 `"tool_calls"`，让 Claude Code 这类客户端有机会真正执行工具。
+3. 转换成 OpenAI `message.tool_calls`（或 `/v1/messages` 上的 Anthropic `tool_use`）。
+
+带 `tools` 的流式请求已支持：代理先缓冲上游 SSE，完成工具适配后，再合成标准 OpenAI / Anthropic 事件流返回给客户端。
+
+同时支持：
+
+- `tool_choice=required` / 指定工具强制调用；若首轮没有 tool call，自动硬提示重试一次
+- Anthropic `POST /v1/messages`（Claude Code / CC Switch）
+- `POST /v1/messages/count_tokens` 启发式估算（非空输入不会返回无意义的 0）
 
 限制：
 
-- 这是基于提示词的适配，不是 CatPawAI GUI 内部 Agent 协议。
+- 这仍是基于提示词的适配，不是 CatPawAI GUI 内部 Agent 协议。
 - 稳定性取决于模型是否严格按 JSON 格式输出。
-- 暂未适配流式工具调用。
-- 如果模型返回普通文本，代理会继续按普通文本返回。
+- 若模型返回普通文本且未强制 `tool_choice`，代理会按普通文本返回。
 
 ## Token 生命周期
 

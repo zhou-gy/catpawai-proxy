@@ -14,8 +14,9 @@ This project is intended for local learning, research, and personal integration 
 
 - OpenAI-compatible `POST /v1/chat/completions`
 - OpenAI-compatible `GET /v1/models`
+- Anthropic-compatible `POST /v1/messages` and `POST /v1/messages/count_tokens`
 - Non-streaming and streaming response support
-- Experimental non-streaming tool-call adapter for clients that send OpenAI `tools`
+- Prompt-based tool-call adapter for OpenAI `tools` (streaming and non-streaming)
 - CatPawAI request encryption and response decoding
 - Windows local state import helper
 - Ubuntu systemd deployment helper
@@ -115,20 +116,30 @@ Useful model ids include:
 
 ## Tool Calls
 
-This proxy includes an experimental non-streaming tool-call adapter. When a client sends OpenAI-compatible `tools`, the proxy injects a strict JSON tool-call instruction into the CatPawAI native request. If the model responds with JSON like:
+CatPawAI's native chat path does not expose OpenAI function calling. This proxy adapts tools with a prompt-based JSON contract:
+
+1. Inject a strict JSON tool-call instruction into the CatPawAI request.
+2. Parse model JSON such as:
 
 ```json
 {"tool_calls":[{"name":"Bash","arguments":{"command":"ls"}}]}
 ```
 
-the proxy converts it to OpenAI `message.tool_calls` with `finish_reason: "tool_calls"` so clients such as coding agents can execute the tool.
+3. Convert it to OpenAI `message.tool_calls` (or Anthropic `tool_use` on `/v1/messages`).
+
+Streaming clients with `tools` are supported: the proxy buffers the upstream SSE, adapts tool JSON, then synthesizes a standard OpenAI/Anthropic event stream.
+
+Also supported:
+
+- `tool_choice=required` / named tool forcing, with one automatic retry if the first reply has no tool call
+- Anthropic `POST /v1/messages` for Claude Code / CC Switch
+- `POST /v1/messages/count_tokens` heuristic estimates (never returns a useless `0` for non-empty input)
 
 Limitations:
 
-- This is prompt-based adaptation, not CatPawAI GUI's internal agent protocol.
-- It depends on the model following the strict JSON format.
-- Streaming tool calls are not adapted yet.
-- If the model replies with normal text, the proxy returns normal text.
+- This is still prompt-based adaptation, not CatPawAI GUI's internal agent protocol.
+- Reliability depends on the model following the JSON format.
+- If the model replies with normal text and tool_choice is not required, the proxy returns normal text.
 
 ## Token Lifetime
 

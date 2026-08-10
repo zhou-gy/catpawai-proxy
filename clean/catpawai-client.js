@@ -111,8 +111,35 @@ function summarizeTool(tool) {
   return `- ${name}: ${description || 'No description'} (${params})`;
 }
 
-function buildToolInstruction(tools) {
-  return [
+function normalizeToolChoiceMode(toolChoice) {
+  if (toolChoice === undefined || toolChoice === null) return { mode: 'auto' };
+  if (typeof toolChoice === 'string') {
+    if (toolChoice === 'none') return { mode: 'none' };
+    if (toolChoice === 'required' || toolChoice === 'any') return { mode: 'required' };
+    if (toolChoice === 'auto') return { mode: 'auto' };
+    return { mode: 'named', name: toolChoice };
+  }
+  if (typeof toolChoice === 'object') {
+    const type = toolChoice.type || 'auto';
+    if (type === 'none') return { mode: 'none' };
+    if (type === 'required' || type === 'any') return { mode: 'required' };
+    if (type === 'tool' || type === 'function') {
+      const name = toolChoice.name || toolChoice.function?.name || '';
+      return name ? { mode: 'named', name } : { mode: 'required' };
+    }
+    return { mode: 'auto' };
+  }
+  return { mode: 'auto' };
+}
+
+function isToolChoiceRequired(toolChoice) {
+  const mode = normalizeToolChoiceMode(toolChoice).mode;
+  return mode === 'required' || mode === 'named';
+}
+
+function buildToolInstruction(tools, toolChoice) {
+  const choice = normalizeToolChoiceMode(toolChoice);
+  const lines = [
     'You can call tools, but this API only accepts a strict JSON tool-call response.',
     'When a tool is needed, respond with JSON only and no prose.',
     'For any file, code, shell, workspace, search, read, edit, write, or project task, you MUST call tools instead of describing the change.',
@@ -120,34 +147,66 @@ function buildToolInstruction(tools) {
     'For file fixes, usually call Read/Glob/Grep first, then Edit/Write. For commands, call Bash.',
     'Use exactly this shape:',
     '{"tool_calls":[{"name":"ToolName","arguments":{"arg":"value"}}]}',
-    'Only answer normally for pure explanation or conversation tasks that do not need workspace access.',
     'Required argument names are marked with *.',
-    'Available tools:',
-    ...tools.map(summarizeTool),
-  ].join('\n');
+  ];
+  if (choice.mode === 'required') {
+    lines.push('tool_choice=required: you MUST return a JSON tool_calls payload now. Plain text answers are forbidden.');
+  } else if (choice.mode === 'named') {
+    lines.push(
+      `tool_choice forces tool "${choice.name}": return JSON tool_calls that call ONLY this tool. Plain text answers are forbidden.`
+    );
+  } else {
+    lines.push('Only answer normally for pure explanation or conversation tasks that do not need workspace access.');
+  }
+  lines.push('Available tools:', ...tools.map(summarizeTool));
+  return lines.join('\n');
 }
 
 function hasToolResultMessage(messages) {
   return Array.isArray(messages) && messages.some((message) => message?.role === 'tool');
 }
 
-function buildToolResultContinuationInstruction(tools) {
+function buildToolResultContinuationInstruction(tools, toolChoice) {
   const toolNames = tools.map(getToolName).filter(Boolean).join(', ');
-  return [
+  const choice = normalizeToolChoiceMode(toolChoice);
+  const lines = [
     'Continue the original user task using the available tools.',
     'You have received tool results from the workspace. Do not summarize them unless the user only asked for a summary.',
     'If the original task asks to fix, modify, update, create, delete, or repair a file, call Edit or Write now.',
     'Respond with strict JSON tool-call format only when continuing with a tool.',
     `Available tool names: ${toolNames}`,
+  ];
+  if (choice.mode === 'required') {
+    lines.push('tool_choice=required still applies: return JSON tool_calls now if more work remains.');
+  } else if (choice.mode === 'named') {
+    lines.push(`If another tool call is needed, call ONLY "${choice.name}".`);
+  }
+  return lines.join('\n');
+}
+
+function buildForcedToolRetryMessage(toolChoice) {
+  const choice = normalizeToolChoiceMode(toolChoice);
+  if (choice.mode === 'named') {
+    return [
+      'Your previous reply did not include a valid tool call.',
+      `Return ONLY JSON tool_calls that invoke "${choice.name}". No markdown, no explanation.`,
+      '{"tool_calls":[{"name":"' + choice.name + '","arguments":{...}}]}',
+    ].join('\n');
+  }
+  return [
+    'Your previous reply did not include a valid tool call.',
+    'Return ONLY a JSON tool_calls payload now. No markdown, no explanation.',
+    '{"tool_calls":[{"name":"ToolName","arguments":{"arg":"value"}}]}',
   ].join('\n');
 }
 
-function buildMessagesWithToolInstruction(messages, tools) {
-  if (!hasTools(tools)) return messages;
-  const instruction = buildToolInstruction(tools);
+function buildMessagesWithToolInstruction(messages, tools, toolChoice) {
+  const choice = normalizeToolChoiceMode(toolChoice);
+  if (choice.mode === 'none' || !hasTools(tools)) return messages;
+  const instruction = buildToolInstruction(tools, toolChoice);
   const result = [{ role: 'system', content: instruction }, ...messages, { role: 'system', content: instruction }];
   if (hasToolResultMessage(messages)) {
-    result.push({ role: 'user', content: buildToolResultContinuationInstruction(tools) });
+    result.push({ role: 'user', content: buildToolResultContinuationInstruction(tools, toolChoice) });
   }
   return result;
 }
@@ -220,9 +279,9 @@ function normalizeCatPawMessage(message) {
   return { role: message.role, content };
 }
 
-function buildCatPawNativePayload({ messages, tools }) {
+function buildCatPawNativePayload({ messages, tools, tool_choice }) {
   return {
-    messages: buildMessagesWithToolInstruction(messages, tools)
+    messages: buildMessagesWithToolInstruction(messages, tools, tool_choice)
       .map(normalizeCatPawMessage)
       .map((message) => ({
         role: message.role,
@@ -473,8 +532,10 @@ function isRedundantReadCall(call, completedReadPaths) {
   return filePath ? completedReadPaths.has(normalizePathKey(filePath)) : false;
 }
 
-function convertTextToToolCalls(text, tools, messages = []) {
+function convertTextToToolCalls(text, tools, messages = [], toolChoice) {
+  if (normalizeToolChoiceMode(toolChoice).mode === 'none') return [];
   if (!hasTools(tools)) return [];
+  const choice = normalizeToolChoiceMode(toolChoice);
   const allowedToolNames = new Set(tools.map(getToolName).filter(Boolean));
   const completedReadPaths = getCompletedReadPaths(messages);
   const explicitCalls = normalizeToolCallItems(parseToolJson(text));
@@ -485,6 +546,7 @@ function convertTextToToolCalls(text, tools, messages = []) {
       arguments: normalizeToolArguments(call),
     }))
     .filter((call) => call.name && (!allowedToolNames.size || allowedToolNames.has(call.name)))
+    .filter((call) => (choice.mode === 'named' ? call.name === choice.name : true))
     .filter((call) => !isRedundantReadCall(call, completedReadPaths))
     .map((call, index) => ({
       id: `call_${Date.now()}_${index}`,
@@ -496,11 +558,12 @@ function convertTextToToolCalls(text, tools, messages = []) {
     }));
 }
 
-function adaptCompletionToolCalls(completion, tools, messages = []) {
+function adaptCompletionToolCalls(completion, tools, messages = [], toolChoice) {
+  if (normalizeToolChoiceMode(toolChoice).mode === 'none') return completion;
   const choice = completion?.choices?.[0];
   const content = choice?.message?.content;
   if (typeof content !== 'string') return completion;
-  const toolCalls = convertTextToToolCalls(content, tools, messages);
+  const toolCalls = convertTextToToolCalls(content, tools, messages, toolChoice);
   if (!toolCalls.length) return completion;
   return {
     ...completion,
@@ -516,6 +579,62 @@ function adaptCompletionToolCalls(completion, tools, messages = []) {
       },
     ],
   };
+}
+
+function needsToolAdaptation(options = {}) {
+  if (normalizeToolChoiceMode(options.tool_choice).mode === 'none') return false;
+  return hasTools(options.tools) || hasToolResultMessage(options.messages);
+}
+
+function completionToOpenAiSse(completion) {
+  const encoder = new TextEncoder();
+  const id = completion.id || `chatcmpl-${Date.now()}`;
+  const created = completion.created || Math.floor(Date.now() / 1000);
+  const model = completion.model || 'catpawai';
+  const choice = completion?.choices?.[0] || {};
+  const message = choice.message || {};
+  const lines = [];
+
+  function pushChunk(delta, finishReason = null) {
+    lines.push(
+      `data: ${JSON.stringify({
+        id,
+        object: 'chat.completion.chunk',
+        created,
+        model,
+        choices: [{ index: 0, delta, finish_reason: finishReason }],
+      })}\n\n`
+    );
+  }
+
+  pushChunk({ role: 'assistant' });
+
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
+    for (let index = 0; index < message.tool_calls.length; index += 1) {
+      const call = message.tool_calls[index];
+      pushChunk({
+        tool_calls: [
+          {
+            index,
+            id: call.id,
+            type: 'function',
+            function: { name: call.function?.name || '', arguments: '' },
+          },
+        ],
+      });
+      const args = call.function?.arguments || '{}';
+      pushChunk({
+        tool_calls: [{ index, function: { arguments: args } }],
+      });
+    }
+    pushChunk({}, 'tool_calls');
+  } else {
+    const content = typeof message.content === 'string' ? message.content : '';
+    if (content) pushChunk({ content });
+    pushChunk({}, choice.finish_reason || 'stop');
+  }
+  lines.push('data: [DONE]\n\n');
+  return encoder.encode(lines.join(''));
 }
 
 function toOpenAiStreamLine(chunk) {
@@ -615,7 +734,7 @@ async function requestChatCompletion({
       headers.Connection = 'keep-alive';
     }
     const payload = isNativeCatPaw
-      ? buildCatPawNativePayload({ messages, tools })
+      ? buildCatPawNativePayload({ messages, tools, tool_choice })
       : buildUpstreamPayload({
           model,
           messages,
@@ -645,42 +764,81 @@ async function requestChatCompletion({
   }
 }
 
-async function createChatCompletion(options) {
+async function createNativeOpenAiCompletion(options) {
+  const env = options.env || process.env;
   const response = await requestChatCompletion({ ...options, stream: false });
-  if (isCatPawAuthMode(options.env || process.env)) {
-    const text = await response.text();
-    return adaptCompletionToolCalls(
-      toOpenAiCompletion(parseSseText(text, response.headers, options.env || process.env), options.model),
-      options.tools,
-      options.messages
-    );
+  const text = await response.text();
+  return adaptCompletionToolCalls(
+    toOpenAiCompletion(parseSseText(text, response.headers, env), options.model),
+    options.tools,
+    options.messages,
+    options.tool_choice
+  );
+}
+
+async function createChatCompletion(options) {
+  if (!isCatPawAuthMode(options.env || process.env)) {
+    const response = await requestChatCompletion({ ...options, stream: false });
+    const payload = await readResponsePayload(response, options.env || process.env);
+    if (payload && typeof payload === 'object' && 'code' in payload && 'data' in payload) {
+      if (payload.code === 0 || payload.code === 200) return payload.data;
+    }
+    return payload;
   }
-  const payload = await readResponsePayload(response, options.env || process.env);
-  if (payload && typeof payload === 'object' && 'code' in payload && 'data' in payload) {
-    if (payload.code === 0 || payload.code === 200) return payload.data;
+
+  let completion = await createNativeOpenAiCompletion(options);
+  const hasToolCalls = Boolean(completion?.choices?.[0]?.message?.tool_calls?.length);
+  if (!hasToolCalls && needsToolAdaptation(options) && isToolChoiceRequired(options.tool_choice)) {
+    const retryMessages = [
+      ...(options.messages || []),
+      { role: 'user', content: buildForcedToolRetryMessage(options.tool_choice) },
+    ];
+    completion = await createNativeOpenAiCompletion({ ...options, messages: retryMessages });
   }
-  return payload;
+  return completion;
 }
 
 async function createChatCompletionStream(options) {
+  const env = options.env || process.env;
+  if (!isCatPawAuthMode(env)) {
+    return requestChatCompletion({ ...options, stream: true });
+  }
+
+  // With tools: buffer upstream SSE, adapt tool JSON, then synthesize OpenAI SSE.
+  if (needsToolAdaptation(options)) {
+    const completion = await createChatCompletion({ ...options, stream: false });
+    return new Response(completionToOpenAiSse(completion), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  }
+
   const response = await requestChatCompletion({ ...options, stream: true });
-  if (!isCatPawAuthMode(options.env || process.env) || !response.body) return response;
-  return new Response(response.body.pipeThrough(createSseTransform(response.headers, options.env || process.env)), {
+  if (!response.body) return response;
+  return new Response(response.body.pipeThrough(createSseTransform(response.headers, env)), {
     status: response.status,
     headers: { 'content-type': 'text/event-stream' },
   });
 }
 
 module.exports = {
+  adaptCompletionToolCalls,
   buildUpstreamPayload,
   buildCatPawHeaders,
   buildCatPawNativePayload,
+  buildForcedToolRetryMessage,
   buildRequestHeaders,
+  buildToolInstruction,
+  completionToOpenAiSse,
+  convertTextToToolCalls,
   createChatCompletion,
   createChatCompletionStream,
   discoverCatPawAi,
   encryptRequestBodyIfNeeded,
+  isToolChoiceRequired,
+  needsToolAdaptation,
   normalizeBaseUrl,
+  normalizeToolChoiceMode,
   parseSseText,
   readResponsePayload,
   requestChatCompletion,

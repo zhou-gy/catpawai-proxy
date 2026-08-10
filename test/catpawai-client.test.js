@@ -410,6 +410,128 @@ test('createChatCompletion converts CatPaw tool JSON text to OpenAI tool calls',
   assert.match(payload.messages[0].content, /Bash/);
 });
 
+test('createChatCompletionStream adapts tools into OpenAI tool_calls SSE', async () => {
+  const { createChatCompletionStream } = require('../clean/catpawai-client');
+  const fetchImpl = async () => {
+    const text = [
+      'data: {"id":"chatcmpl-stream-tool","object":"chat.completion.chunk","created":1,"model":"glm-5.2","content":"{\\"tool_calls\\":[{\\"name\\":\\"Bash\\",\\"arguments\\":{\\"command\\":\\"pwd\\"}}]}","finishReason":"stop"}',
+      '',
+    ].join('\n');
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      text: async () => text,
+    };
+  };
+
+  const response = await createChatCompletionStream({
+    model: 'glm-5.2',
+    messages: [{ role: 'user', content: 'pwd' }],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'Bash',
+          description: 'Run a shell command',
+          parameters: {
+            type: 'object',
+            properties: { command: { type: 'string' } },
+            required: ['command'],
+          },
+        },
+      },
+    ],
+    env: {
+      CATPAWAI_OPENAI_BASE_URL: 'https://catpaw.meituan.com/api/gpt',
+      CATPAWAI_AUTH_MODE: 'catpaw',
+      CATPAWAI_ACCESS_TOKEN: 'token-123',
+      CATPAWAI_MIS_ID: 'user-a',
+      CATPAWAI_ENCRYPTION: 'false',
+    },
+    fetchImpl,
+  });
+
+  const text = await response.text();
+  assert.match(text, /"tool_calls"/);
+  assert.match(text, /"name":"Bash"/);
+  assert.match(text, /"finish_reason":"tool_calls"/);
+  assert.match(text, /data: \[DONE\]/);
+});
+
+test('tool_choice=required retries once when first reply has no tool call', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    const content =
+      calls === 1
+        ? 'I will list files later.'
+        : '{"tool_calls":[{"name":"Bash","arguments":{"command":"ls"}}]}';
+    const text = [
+      `data: {"id":"chatcmpl-retry","object":"chat.completion.chunk","created":1,"model":"glm-5.2","content":${JSON.stringify(content)},"finishReason":"stop"}`,
+      '',
+    ].join('\n');
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      text: async () => text,
+    };
+  };
+
+  const result = await createChatCompletion({
+    model: 'glm-5.2',
+    messages: [{ role: 'user', content: 'list files' }],
+    tool_choice: 'required',
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'Bash',
+          description: 'Run a shell command',
+          parameters: {
+            type: 'object',
+            properties: { command: { type: 'string' } },
+            required: ['command'],
+          },
+        },
+      },
+    ],
+    env: {
+      CATPAWAI_OPENAI_BASE_URL: 'https://catpaw.meituan.com/api/gpt',
+      CATPAWAI_AUTH_MODE: 'catpaw',
+      CATPAWAI_ACCESS_TOKEN: 'token-123',
+      CATPAWAI_MIS_ID: 'user-a',
+      CATPAWAI_ENCRYPTION: 'false',
+    },
+    fetchImpl,
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.choices[0].finish_reason, 'tool_calls');
+  assert.equal(result.choices[0].message.tool_calls[0].function.name, 'Bash');
+});
+
+test('tool_choice=required injects hard instruction into CatPaw payload', () => {
+  const { buildCatPawNativePayload } = require('../clean/catpawai-client');
+  const payload = buildCatPawNativePayload({
+    messages: [{ role: 'user', content: 'run ls' }],
+    tool_choice: 'required',
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'Bash',
+          description: 'Run shell',
+          parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] },
+        },
+      },
+    ],
+  });
+  assert.match(payload.messages[0].content, /tool_choice=required/);
+  assert.match(payload.messages[0].content, /Plain text answers are forbidden/);
+});
+
 test('CatPaw crypto encrypts requests and decrypts responses', () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,

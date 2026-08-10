@@ -5,6 +5,13 @@ const cors = require('cors');
 const { Readable } = require('node:stream');
 const { AppError, openAiError } = require('./errors');
 const defaultCatPawAiClient = require('./catpawai-client');
+const {
+  anthropicRequestToChat,
+  collectCountTokensText,
+  estimateTokensFromText,
+  openAiCompletionToAnthropicMessage,
+  openAiCompletionToAnthropicSse,
+} = require('./anthropic-adapter');
 const { DEFAULT_MODEL_ID, MODELS } = require('./models');
 
 function validateChatRequest(body) {
@@ -21,6 +28,15 @@ function validateChatRequest(body) {
     if (!['system', 'user', 'assistant', 'tool'].includes(message.role)) {
       throw new AppError(400, 'unsupported_role', `Unsupported message role: ${message.role}`);
     }
+  }
+}
+
+function validateAnthropicRequest(body) {
+  if (!body || typeof body !== 'object') {
+    throw new AppError(400, 'invalid_request', 'Request body must be a JSON object.');
+  }
+  if (!Array.isArray(body.messages) || body.messages.length === 0) {
+    throw new AppError(400, 'invalid_messages', 'messages must be a non-empty array.');
   }
 }
 
@@ -41,7 +57,7 @@ function createApp({ env = process.env, catpawaiClient = defaultCatPawAiClient }
       nextStep: needsCatPawToken
         ? 'Set CATPAWAI_ACCESS_TOKEN and CATPAWAI_MIS_ID, then retry /v1/chat/completions.'
         : discovery.openAiBaseUrlConfigured
-          ? 'Use /v1/chat/completions.'
+          ? 'Use /v1/chat/completions or /v1/messages.'
           : 'Set CATPAWAI_OPENAI_BASE_URL only if CatPawAI exposes an explicit OpenAI-compatible backend.',
     };
   }
@@ -103,6 +119,61 @@ function createApp({ env = process.env, catpawaiClient = defaultCatPawAiClient }
         stream: false,
       });
       res.status(200).json(result);
+    } catch (error) {
+      const { status, body } = openAiError(error);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post('/v1/messages', async (req, res) => {
+    try {
+      validateAnthropicRequest(req.body);
+      let chat;
+      try {
+        chat = anthropicRequestToChat(req.body);
+      } catch (error) {
+        throw new AppError(400, 'invalid_request', `request conversion error: ${error.message}`);
+      }
+
+      const request = {
+        model: chat.model || req.body.model || DEFAULT_MODEL_ID,
+        messages: chat.messages,
+        stream: false,
+        temperature: chat.temperature,
+        max_tokens: chat.max_tokens,
+        tools: chat.tools,
+        tool_choice: chat.tool_choice,
+        env,
+        signal: req.signal,
+      };
+
+      const completion = await catpawaiClient.createChatCompletion(request);
+      const clientWantsStream = req.body.stream !== false;
+
+      if (clientWantsStream) {
+        const bytes = openAiCompletionToAnthropicSse(completion, request.model);
+        res.status(200);
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.end(Buffer.from(bytes));
+        return;
+      }
+
+      res.status(200).json(openAiCompletionToAnthropicMessage(completion, request.model));
+    } catch (error) {
+      const { status, body } = openAiError(error);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post('/v1/messages/count_tokens', (req, res) => {
+    try {
+      if (!req.body || typeof req.body !== 'object') {
+        throw new AppError(400, 'invalid_request', 'Request body must be a JSON object.');
+      }
+      const text = collectCountTokensText(req.body);
+      res.status(200).json({ input_tokens: estimateTokensFromText(text) });
     } catch (error) {
       const { status, body } = openAiError(error);
       res.status(status).json(body);
